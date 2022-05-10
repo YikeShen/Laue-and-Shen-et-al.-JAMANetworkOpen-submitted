@@ -1,4 +1,4 @@
-In utero exposure to caffeine and acetaminophen, the gut microbiome, and neurodevelopmental outcomes, a prospective birth cohort study\
+# In utero exposure to caffeine and acetaminophen, the gut microbiome, and neurodevelopmental outcomes, a prospective birth cohort study\
 
 Hannah E. Laue1*#, Yike Shen2#, Tessa R. Bloomquist2, Haotian Wu2, Kasey J.M. Brennan2, Raphael Cassoulet3, Erin Wilkie4, 
 Virginie Gillet4,Anne-Sandrine Desautels4, Nadia Abdelouahab4, Jean Philippe Bellenger3, Heather H. Burris5, Brent A. Coull6,
