@@ -13,7 +13,7 @@ Marc G. Weisskopf7, Wei Zhang8, Larissa Takser4,9, Andrea A. Baccarelli2
 7 Department of Environmental Health, Harvard T.H. Chan School of Public Health, Boston, MA, USA
 8 Department of Preventive Medicine, Northwestern University Feinberg School of Medicine, Chicago, IL, USA
 9 Département de Psychiatrie, Faculté de Médicine et Sciences de la Santé, Université de Sherbrooke, Sherbrooke, Quebec, Canada
-# Equal contribution
+#Equal contribution
 
 *Correspondence to: Dr. Hannah E. Laue. Department of Epidemiology, Geisel School of Medicine at Dartmouth College. Email: Hannah.E.Laue@Dartmouth.edu
 Specific code questions please email: Dr. Yike Shen. ys3419@cumc.columbia.edu
