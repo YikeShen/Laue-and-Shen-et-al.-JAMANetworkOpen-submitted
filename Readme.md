@@ -19,4 +19,6 @@ Marc G. Weisskopf7, Wei Zhang8, Larissa Takser4,9, Andrea A. Baccarelli2
 Specific code questions please email: Dr. Yike Shen. ys3419@cumc.columbia.edu \
 
 #All code are de-identified for patient information protection.  \
+
+#Currently in minor revision.\
 #De-identified code available as soon as the paper is accepted. \
