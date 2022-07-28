@@ -12,4 +12,4 @@ Specific code questions please email: Dr. Yike Shen. ys3419@cumc.columbia.edu \
 #All code are de-identified for patient information protection.  \
 
 #Repository currently being updated.\
-#Please refers to https://github.com/YikeShen/Shen-et-al.-2022_Environmental-Health-Perspectives for Microbiome sequencing processing shell scripts \
+#Please refer to https://github.com/YikeShen/Shen-et-al.-2022_Environmental-Health-Perspectives for shotgun metagenome sequencing processing shell scripts \
