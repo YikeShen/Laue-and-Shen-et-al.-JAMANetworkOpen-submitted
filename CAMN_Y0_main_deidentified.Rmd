@@ -1,0 +1,2524 @@
+---
+title: "Caffine_Microbiome"
+output: html_document
+---
+
+## Housekeeping
+
+setwd("/Users/yikeshen/CaffeineMicrobiome")
+
+```{r}
+rm(list=ls())
+
+require("readxl")
+require(plyr)
+require(dplyr)
+require(devtools)
+require(phyloseq)
+require(readr)
+require(tidyverse)
+require(tidyr)
+require(Maaslin2)
+require(scales)
+require(microbiome)
+require(ape)
+require(vegan)
+require(RColorBrewer)
+require(lmtest)
+```
+
+#Metadata
+#Table1:Summary Statistics-All
+```{r}
+RAW <- read.csv("Caffine_data_raw.csv")
+
+RAW <- RAW %>% as.data.frame()
+Caffineprocessing<- apply(RAW, 2, function(x) gsub("^$|^ $", NA, x)) %>% as.data.frame()
+
+Caffineprocessing$meco_caffeine[Caffineprocessing$meco_caffeine == "."] <- NA
+
+Caffineprocessing <- Caffineprocessing %>% as.data.frame() %>% 
+  dplyr::rename(SampleID=record_id) %>%
+  dplyr::rename(Caffeine=meco_caffeine) %>% 
+  dplyr::rename(Acetaminophen=meco_acetaminophene) %>%
+  dplyr::rename(Maternal_recruitment_age=momagerecrutmcalcul) %>% 
+  dplyr::rename(Maternal_BMI_prepreg=bmipregros_cal) %>% 
+  dplyr::rename(Family_Income_postdelivery=revenu) %>%
+  dplyr::rename(Parity=primipar) %>% 
+  dplyr::rename(Gestational_age=ga_wks_bb) %>% 
+  dplyr::rename(Delivery_mode=acc_cs) %>% 
+  dplyr::rename(Sex=sexe_bb) %>% 
+  dplyr::rename(Child_birthweight=masse_bb) %>% 
+  dplyr::rename(Breastfed=maternelbf) %>% 
+  dplyr::rename(Block_Design=bls_pond) %>% 
+  dplyr::rename(Coding=code_pond) %>% 
+  dplyr::rename(Digit_span=sct_pond) %>% 
+  dplyr::rename(Information=connaiss_p) %>% 
+  dplyr::rename(Vocabulary=vocab_pond) %>% 
+  dplyr::rename(QTAC=qtac) 
+  
+
+Caffineprocessing <- Caffineprocessing %>% 
+  dplyr::select(SampleID,Caffeine,Acetaminophen,Maternal_recruitment_age,Maternal_BMI_prepreg,Family_Income_postdelivery,Parity,Gestational_age,Delivery_mode,Delivery_mode,Sex,Child_birthweight,Breastfed,Block_Design,Coding,Digit_span,Information,Vocabulary,QTAC)
+
+Caffineprocessing$Parity[Caffineprocessing$Parity == " 1"] <- 'Yes'
+Caffineprocessing$Parity[Caffineprocessing$Parity == " 0"] <- 'No'
+
+Caffineprocessing$Delivery_mode[Caffineprocessing$Delivery_mode == " 1"] <- 'Vaginal'
+Caffineprocessing$Delivery_mode[Caffineprocessing$Delivery_mode == " 2"] <- 'C_section'
+
+Caffineprocessing$Sex[Caffineprocessing$Sex == " 0"] <- 'Female'
+Caffineprocessing$Sex[Caffineprocessing$Sex == " 1"] <- 'Male'
+
+Caffineprocessing$Breastfed[Caffineprocessing$Breastfed == " 1"] <- 'Ever'
+Caffineprocessing$Breastfed[Caffineprocessing$Breastfed == " 0"] <- 'Never'
+Caffineprocessing$Breastfed[Caffineprocessing$Breastfed == "99"] <- NA
+
+Caffineprocessing$Maternal_BMI_prepreg[Caffineprocessing$Maternal_BMI_prepreg == " 0.00000"] <- NA
+Caffineprocessing$Maternal_BMI_prepreg[Caffineprocessing$Maternal_BMI_prepreg == "     Inf"] <- NA
+
+
+Caffineprocessing$Acetaminophen[Caffineprocessing$Acetaminophen == "<LOD"] <-'ND'
+Caffineprocessing$Acetaminophen[Caffineprocessing$Acetaminophen == "LOD<"] <-'ND'
+Caffineprocessing$Acetaminophen[Caffineprocessing$Acetaminophen == "<LOQ"] <-'ND'
+
+
+SampleIDFULL <- Caffineprocessing$SampleID
+rownames(Caffineprocessing) <- SampleIDFULL
+
+Caffineprocessing[,c(2,4:6,8,11,13:18)] <- lapply(Caffineprocessing[,c(2,4:6,8,11,13:18)], function(x) as.numeric(as.character(x)))
+
+WISCSUM <- Caffineprocessing[,13:17]
+WISCSUM <- rowSums(WISCSUM) %>% as.data.frame()
+colnames(WISCSUM) <- "WISC_sum"
+
+Caffineprocessing <- cbind(Caffineprocessing,WISCSUM)
+Caffineprocessing <- Caffineprocessing[,-1]
+
+#table1::table1(~., data = Caffineprocessing)
+
+```
+
+#Table1-Population with meconium_caffeine & acetaminophen
+```{r}
+Caffineprocessing_compeletecaffeine <- Caffineprocessing[complete.cases(Caffineprocessing[ ,1]),]
+Caffineprocessing_compeletecace <- Caffineprocessing[complete.cases(Caffineprocessing[ ,2]),]
+
+#table1::table1(~., data = Caffineprocessing_compeletecaffeine)
+#table1::table1(~., data = Caffineprocessing_compeletecace)
+
+```
+
+
+#Table1-intersect:Caffeine-microbiome
+```{r}
+PathwayClean <- read.csv("Pathway_clean.csv")
+PathwayClean <- PathwayClean %>% dplyr::rename(SampleID=X)
+
+Caffineprocessing_compeletecaffeine <- Caffineprocessing_compeletecaffeine[,-19]
+ID_mecocaffiene <- rownames(Caffineprocessing_compeletecaffeine) %>% as.data.frame()
+colnames(ID_mecocaffiene) <- 'SampleID'
+
+#Rawdata has empty space for all character string, cleanup SampleID format
+ID_mecocaffiene$SampleID <- as.numeric(ID_mecocaffiene$SampleID)
+ID_mecocaffiene$SampleID <- as.character(ID_mecocaffiene$SampleID)
+
+Caffineprocessing_compeletecaffeine <- cbind(ID_mecocaffiene,Caffineprocessing_compeletecaffeine)
+
+Caffeine_microbiome_subsetID <- PathwayClean %>% select(SampleID)
+Caffeine_microbiome_subsetID$SampleID <- as.character(Caffeine_microbiome_subsetID$SampleID)
+
+rownames(Caffeine_microbiome_subsetID) <- Caffeine_microbiome_subsetID$SampleID
+
+
+CaffeineMatch <- match_df(Caffineprocessing_compeletecaffeine,Caffeine_microbiome_subsetID, on ="SampleID")
+CaffeineMatch <- CaffeineMatch[,-1]
+#table1::table1(~., data = CaffeineMatch)
+
+
+CaffeineMatchModel <- CaffeineMatch %>% select(Caffeine,Breastfed,Delivery_mode,Family_Income_postdelivery,Sex)
+AceMatchMatchModel <- CaffeineMatch %>% select(Acetaminophen,Breastfed,Delivery_mode,Family_Income_postdelivery,Sex)
+AceMatchMatchModel$Acetaminophen[!AceMatchMatchModel$Acetaminophen == "ND"] <-'D'
+
+#write.csv(AceMatchMatchModel %>% select(Acetaminophen),"Caffeine_microbiome_49.csv")
+```
+
+#Metaphlan table cleanup
+```{r}
+SPECIES <- lapply(list.files(pattern = "*merged_abundance_table.tsv"), function(i){read_tsv(i)}) 
+
+IDS <- lapply(SPECIES,function(x) substring(names(x),1,regexpr("_dehost_metaphlan_bugs_list",names(x))-1))
+IDS <- unlist(IDS)[-1]
+
+SPECIES <- lapply(SPECIES, function(x) 
+  separate(data = x, col = "#clade_name", into = c("Domain","Phylum","Class","Order","Family","Genus","Species"), sep = "\\|"))
+SPECIES <- lapply(SPECIES, subset)
+SPECIES <- SPECIES %>% reduce(full_join, by = "Domain")
+colnames(SPECIES)[8:ncol(SPECIES)] <- IDS
+SPECIES <- SPECIES[,-8] %>% as.data.frame()
+
+
+SPECIES_Species <- SPECIES[complete.cases(SPECIES[ ,7]),]
+SPECIES_Species_relab <- SPECIES_Species
+dim(SPECIES_Species[duplicated(SPECIES_Species$Species),])[1]
+
+Species_phyla <- SPECIES[!rowSums(is.na.data.frame(SPECIES))<5,]
+Species_phyla <- Species_phyla[complete.cases(Species_phyla[ ,2]),]
+Species_phyla <- Species_phyla[,-c(3:7)]
+
+
+```
+
+
+#log transfer caffeine for microbiome analyses all at once
+#turn acetaminophen ND as refernce group
+```{r}
+CaffeineMatchModel$Caffeine <- log2(CaffeineMatchModel$Caffeine)
+AceMatchMatchModel$Caffeine <- log2(CaffeineMatchModel$Caffeine)
+
+AceMatchMatchModel$Acetaminophen <- as.factor(AceMatchMatchModel$Acetaminophen)
+AceMatchMatchModel <- within(AceMatchMatchModel, Acetaminophen <- relevel(Acetaminophen, ref = "ND"))
+
+```
+
+
+#Turn to phyloseq object-caffeine
+```{r}
+#Name it OTU, but it's not OTU! It's species relative abundance
+OTU <- SPECIES_Species_relab
+ROWNAMES_Species <- OTU$Species
+OTU <- OTU[,-c(1:7)]
+
+row.names(OTU) <- NULL
+row.names(OTU) <- ROWNAMES_Species
+OTU <- OTU %>% as.matrix()
+
+colnames(OTU) <- paste("P",colnames(OTU),sep="_")
+
+Taxonomy <- SPECIES_Species_relab %>% 
+  dplyr::select("Domain","Phylum","Class","Order","Family","Genus","Species")
+
+TAX <- Taxonomy %>% as.data.frame() %>% 
+  mutate(Domain=gsub("d__","",Domain)) %>% 
+  mutate(Phylum=gsub("p__","",Phylum)) %>% 
+  mutate(Class=gsub("c__","",Class)) %>% 
+  mutate(Order=gsub("o__","",Order)) %>% 
+  mutate(Family=gsub("f__","",Family)) %>% 
+  mutate(Genus=gsub("g__","",Genus)) %>% 
+  mutate(Species=gsub("s__","",Species)) %>% 
+  as.matrix() %>% as.data.frame()
+
+TAX <- TAX %>% as.matrix()
+row.names(TAX) <- ROWNAMES_Species
+
+map <- CaffeineMatchModel
+map <- cbind(rownames(CaffeineMatchModel),map) 
+map$`rownames(CaffeineMatchModel)` <- as.numeric(map$`rownames(CaffeineMatchModel)`)
+List_49 <- map$`rownames(CaffeineMatchModel)`
+row.names(map) <- List_49
+row.names(map) <- paste("P",row.names(map),sep="_")
+map <- map[,-1]
+
+OTU=otu_table(OTU,taxa_are_rows = TRUE)
+rownames(TAX) <- row.names(OTU)
+TAX=tax_table(TAX)
+map <- map %>% as.data.frame()
+MAP <- sample_data(map)
+
+physeq_caffeine = merge_phyloseq(OTU, TAX, MAP)
+Tree=rtree(ntaxa(physeq_caffeine),rooted=TRUE,tip.label = taxa_names(physeq_caffeine))
+
+physeq_caffeine = phyloseq(OTU, TAX, MAP,Tree)
+
+```
+
+#pathway physeq
+```{r}
+CaffeineMatch_pathway <- match_df(PathwayClean,Caffineprocessing_compeletecaffeine, on ="SampleID")
+CaffeineMatch_pathway <- CaffeineMatch_pathway[,colSums(CaffeineMatch_pathway == 0) <= nrow(CaffeineMatch_pathway)*0.9]
+top10pathway <- CaffeineMatch_pathway
+rownames(top10pathway) <- NULL
+pathwayrowlist <- top10pathway$SampleID
+rownames(top10pathway) <- pathwayrowlist
+top10pathway <- top10pathway[,-1]
+top10pathway <- top10pathway %>% t()
+colnames(top10pathway) <- paste("P",colnames(top10pathway),sep="_")
+
+OTU_path<- top10pathway
+
+Taxonomy_path <- rownames(top10pathway) %>% as.data.frame()
+colnames(Taxonomy_path) <- 'Pathway'
+
+TAX_path <- Taxonomy_path %>% as.matrix()
+row.names(TAX_path) <- rownames(top10pathway)
+
+map_path <- CaffeineMatchModel
+map_path <- cbind(rownames(CaffeineMatchModel),map_path) 
+map_path$`rownames(CaffeineMatchModel)` <- as.numeric(map_path$`rownames(CaffeineMatchModel)`)
+List_49 <- map_path$`rownames(CaffeineMatchModel)`
+row.names(map_path) <- List_49
+row.names(map_path) <- paste("P",row.names(map_path),sep="_")
+map_path <- map_path[,-1]
+
+OTU_path=otu_table(OTU_path,taxa_are_rows = TRUE)
+rownames(TAX_path) <- row.names(OTU_path)
+TAX_path=tax_table(TAX_path)
+map_path <- map_path %>% as.data.frame()
+MAP_path <- sample_data(map_path)
+
+physeq_path = merge_phyloseq(OTU_path, TAX_path, MAP_path)
+Tree=rtree(ntaxa(physeq_path),rooted=TRUE,tip.label = taxa_names(physeq_path))
+
+physeq_path = phyloseq(OTU_path, TAX_path, MAP_path,Tree)
+
+```
+
+
+
+#Top10%species,phyla, pathways
+#34species, all 9 phyla, 36 pathways
+```{r}
+####TOP10%species
+species.sum = tapply(taxa_sums(physeq_caffeine), tax_table(physeq_caffeine)[, "Species"], sum, na.rm=TRUE)
+
+Top10species = names(sort(species.sum, TRUE))[1:34]
+physeqspecies10 = prune_taxa((tax_table(physeq_caffeine)[, "Species"] %in% Top10species), physeq_caffeine)
+
+phyloGlom = tax_glom(physeqspecies10, "Species")
+glomTax = tax_table(phyloGlom)[,"Species"]
+glomOTU = otu_table(phyloGlom)
+glomTable = merge(glomOTU,glomTax,by=0,all=TRUE) 
+TOP10SPECIES_table <- glomTable
+
+
+####All phyla
+TOP10Phylum_table <- Species_phyla[,-1]
+rownames(TOP10Phylum_table) <-NULL 
+TOP10Phylum_table <- TOP10Phylum_table %>% as.data.frame() %>% 
+  mutate(Phylum=gsub("p__","",Phylum))
+  
+####Top10%pathway
+pathway.sum = tapply(taxa_sums(physeq_path), tax_table(physeq_path)[, "Pathway"], sum, na.rm=TRUE)
+
+Top10pathway_2 = names(sort(pathway.sum, TRUE))[1:36]
+physeqpath10 = prune_taxa((tax_table(physeq_path)[, "Pathway"] %in% Top10pathway_2), physeq_path)
+
+phyloGlom_path = tax_glom(physeqpath10, "Pathway")
+glomTax_path = tax_table(phyloGlom_path)[,"Pathway"]
+glomOTU_path = otu_table(phyloGlom_path)
+glomTable_path = merge(glomOTU_path,glomTax_path,by=0,all=TRUE) 
+TOP10pathway_table <- glomTable_path
+
+
+
+```
+
+
+#interaction preprocessing
+```{r}
+#SpeciesAll
+TOP10SPECIES_table <- TOP10SPECIES_table[,-1]
+row.names(TOP10SPECIES_table) <- TOP10SPECIES_table$Species
+TOP10SPECIES_table <- TOP10SPECIES_table[,-50]
+TOP10SPECIES_table <- TOP10SPECIES_table %>% t()
+rowClean <- function(x){ rownames(x) <- gsub("P_", "", rownames(x)); x } 
+TOP10SPECIES_table <- rowClean(TOP10SPECIES_table)
+TOP10SPECIES_table <- TOP10SPECIES_table %>% as.data.frame()
+
+#Metadata
+CaffeineMatchModel <- cbind(row.names(CaffeineMatchModel),CaffeineMatchModel)
+CaffeineMatchModel$`row.names(CaffeineMatchModel)` <- as.numeric(CaffeineMatchModel$`row.names(CaffeineMatchModel)`)
+row.names(CaffeineMatchModel) <- NULL
+row.names(CaffeineMatchModel) <- CaffeineMatchModel$`row.names(CaffeineMatchModel)`
+CaffeineMatchModel <- CaffeineMatchModel[,-1]
+
+#Neuro match
+neurosubset49 <- Caffineprocessing_compeletecaffeine[,-c(2:12)]
+row.names(neurosubset49) <- NULL
+row.names(neurosubset49) <- neurosubset49$SampleID
+matchneuro <- cbind(row.names(CaffeineMatchModel),CaffeineMatchModel)
+matchneuro <- matchneuro %>% dplyr::rename(SampleID="row.names(CaffeineMatchModel)")
+
+neurosubset49 <- match_df(neurosubset49,matchneuro, on ="SampleID")
+neurosubset49 <- neurosubset49[,-1]
+
+INTERACTION_speciesdf <- merge(CaffeineMatchModel, TOP10SPECIES_table, by = 0)
+row.names(INTERACTION_speciesdf) <- INTERACTION_speciesdf$Row.names
+INTERACTION_speciesdf <- INTERACTION_speciesdf[,-1]
+
+#bind acetaminophen
+AceMatchinteraction <- AceMatchMatchModel %>% select(Acetaminophen)
+INTERACTION_speciesdf <- cbind(AceMatchinteraction,INTERACTION_speciesdf)
+
+
+INTERACTION_speciesdf <- cbind(INTERACTION_speciesdf,neurosubset49)
+
+
+```
+
+#caffeine interaction on species
+```{r}
+#LRT test
+interaction_df <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df) <- Rownameloopspecies
+colnames(interaction_df) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+  
+    formula1 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula1,INTERACTION_speciesdf)
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula2, INTERACTION_speciesdf)
+    
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_df[speciesname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+}
+
+
+interaction_df_reshape <- cbind(row.names(interaction_df),interaction_df)
+interaction_df_reshape <- interaction_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_df)`)
+interaction_df_reshape <- gather(interaction_df_reshape, "SampleIDID", "value",2:8)
+
+interaction_df_reshape$FDR_qval <- p.adjust(interaction_df_reshape$value, method = "fdr")
+interaction_df_reshape <- interaction_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+#
+###########Caffeine Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["Caffeine"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Caffeine_coefficient=value)
+
+################caffeine main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["Caffeine","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Caffeine_stderr=value)
+
+
+##############species - main effect################
+
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+
+CAFFEINE_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+CAFFEINE_INTERACTION_OUTPUT <- CAFFEINE_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(CAFFEINE_INTERACTION_OUTPUT)[1] <- "Species"
+
+ConfidenceIntervals <- data.frame(maincaffeine_cilow = numeric(),
+                       maincaffeine_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:238,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$maincaffeine_cilow <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient-1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+ConfidenceIntervals$maincaffeine_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient+1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- CAFFEINE_INTERACTION_OUTPUT$Species_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Species_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+
+CAFFEINE_INTERACTION_OUTPUT <-cbind(CAFFEINE_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <-CAFFEINE_INTERACTION_OUTPUT %>% dplyr::select(Species, SampleIDID, Caffeine_coefficient,Caffeine_stderr,maincaffeine_cilow,maincaffeine_cihigh,Species_coef,,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <- cbind(CAFFEINE_INTERACTION_OUTPUT_reorder,interaction_df_reshape[,-c(1:2)])
+
+```
+
+
+#Caffeine interaction on pathway
+#preprocessing must run
+```{r}
+#########pathway interaction######
+TOP10pathway_table <- TOP10pathway_table[,-1]
+row.names(TOP10pathway_table) <- TOP10pathway_table$Pathway
+TOP10pathway_table <- TOP10pathway_table[,-50]
+TOP10pathway_table <- TOP10pathway_table %>% t()
+rowClean <- function(x){ rownames(x) <- gsub("P_", "", rownames(x)); x } 
+TOP10pathway_table <- rowClean(TOP10pathway_table)
+TOP10pathway_table <- TOP10pathway_table %>% as.data.frame()
+
+#Normalize to 100%
+TOP10pathway_table <- TOP10pathway_table*100
+INTERACTION_speciesdf <- cbind(INTERACTION_speciesdf,TOP10pathway_table)
+```
+
+
+###Caffeine interaction on pathway
+### MUST CLEAN UP working environment and SPECIES BEFORE START
+```{r}
+###SAME NAMING
+###changed to percentage
+
+#48-83
+interaction_pathway_df <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopath <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_pathway_df) <- Rownameloopath
+colnames(interaction_pathway_df) <- Colnameloopneuro
+
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    pathname=colnames(INTERACTION_speciesdf[i])
+
+    formula3 <- as.formula(paste0(neuroname, "~", "Caffeine +", pathname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula3,INTERACTION_speciesdf)
+
+    formula4 <- as.formula(paste0(neuroname, "~", "Caffeine +", pathname, "+", pathname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula4, INTERACTION_speciesdf)
+
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_pathway_df[pathname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+
+}
+
+
+interaction_pathway_df_reshape <- cbind(row.names(interaction_pathway_df),interaction_pathway_df)
+interaction_pathway_df_reshape <- interaction_pathway_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_pathway_df)`)
+interaction_pathway_df_reshape <- gather(interaction_pathway_df_reshape, "SampleIDID", "value",2:8)
+interaction_pathway_df_reshape$FDR_qval <- p.adjust(interaction_pathway_df_reshape$value, method = "fdr")
+
+interaction_pathway_df_reshape <- interaction_pathway_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+###########Caffeine Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["Caffeine"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Caffeine_coefficient=value)
+
+################caffeine main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["Caffeine","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Caffeine_stderr=value)
+
+
+##############species - main effect################
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_pathway_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_pathway_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+
+
+
+
+CAFFEINE_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+CAFFEINE_INTERACTION_OUTPUT <- CAFFEINE_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(CAFFEINE_INTERACTION_OUTPUT)[1] <- "Pathway"
+
+ConfidenceIntervals <- data.frame(maincaffeine_cilow = numeric(),
+                       maincaffeine_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:252,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$maincaffeine_cilow <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient-1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+ConfidenceIntervals$maincaffeine_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient+1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- CAFFEINE_INTERACTION_OUTPUT$Species_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Species_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+
+CAFFEINE_INTERACTION_OUTPUT <-cbind(CAFFEINE_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <-CAFFEINE_INTERACTION_OUTPUT %>% dplyr::select(Pathway, SampleIDID, Caffeine_coefficient,Caffeine_stderr,maincaffeine_cilow,maincaffeine_cihigh,Species_coef,,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <- cbind(CAFFEINE_INTERACTION_OUTPUT_reorder,interaction_pathway_df_reshape[,-c(1:2)])
+
+
+```
+
+
+###Caffeine interaction on phylum
+### MUST CLEAN UP working environment and SPECIES BEFORE START
+```{r}
+###########phylum#########
+row.names(TOP10Phylum_table) <- TOP10Phylum_table$Phylum
+TOP10Phylum_table <- TOP10Phylum_table[,-1]
+TOP10Phylum_table <- TOP10Phylum_table %>% t()
+TOP10Phylum_table <- cbind(row.names(TOP10Phylum_table),TOP10Phylum_table)
+TOP10Phylum_table <- TOP10Phylum_table %>% as.data.frame() %>% dplyr::rename(SampleID='V1')
+TOP10Phylum_table <- match_df(TOP10Phylum_table,matchneuro, on ="SampleID")
+TOP10Phylum_table <- TOP10Phylum_table %>% arrange(SampleID)
+TOP10Phylum_table <- TOP10Phylum_table[,-1]
+TOP10Phylum_table[] <- lapply(TOP10Phylum_table[], function(x) as.numeric(as.character(x)))
+
+
+INTERACTION_speciesdf <- cbind(INTERACTION_speciesdf,TOP10Phylum_table)
+INTERACTION_speciesdf <- INTERACTION_speciesdf %>% select(-Fusobacteria,-Spirochaetes,-Eukaryota_unclassified,-Euryarchaeota)
+
+#84-88
+#48-52, rownames
+interaction_phyla_df <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloophyla <- colnames(INTERACTION_speciesdf)[84:88]
+#Rownameloophyla <- colnames(INTERACTION_speciesdf)[48:52]
+row.names(interaction_phyla_df) <- Rownameloophyla
+colnames(interaction_phyla_df) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    phylaname=colnames(INTERACTION_speciesdf[i])
+  
+    formula5 <- as.formula(paste0(neuroname, "~", "Caffeine +", phylaname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula5,INTERACTION_speciesdf)
+    
+    formula6 <- as.formula(paste0(neuroname, "~", "Caffeine +", phylaname, "+", phylaname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula6, INTERACTION_speciesdf)
+    
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_phyla_df[phylaname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+  
+}
+
+
+interaction_phyla_df_reshape <- cbind(row.names(interaction_phyla_df),interaction_phyla_df)
+interaction_phyla_df_reshape <- interaction_phyla_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_phyla_df)`)
+interaction_phyla_df_reshape <- gather(interaction_phyla_df_reshape, "SampleIDID", "value",2:8)
+interaction_phyla_df_reshape$FDR_qval <- p.adjust(interaction_phyla_df_reshape$value, method = "fdr")
+#siginificant Proteobacteria WISC_SUM & DIGIT SPAN
+
+
+interaction_phyla_df_reshape <- interaction_phyla_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+###########Caffeine Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["Caffeine"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Caffeine_coefficient=value)
+
+################caffeine main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["Caffeine","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Caffeine_stderr=value)
+
+
+##############species - main effect################
+
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_phyla_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Caffeine +", speciesname, "+", speciesname, "*Caffeine", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_phyla_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+
+
+
+
+CAFFEINE_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+CAFFEINE_INTERACTION_OUTPUT <- CAFFEINE_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(CAFFEINE_INTERACTION_OUTPUT)[1] <- "Phylum"
+
+ConfidenceIntervals <- data.frame(maincaffeine_cilow = numeric(),
+                       maincaffeine_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:35,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$maincaffeine_cilow <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient-1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+ConfidenceIntervals$maincaffeine_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Caffeine_coefficient+1.96*CAFFEINE_INTERACTION_OUTPUT$Caffeine_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- CAFFEINE_INTERACTION_OUTPUT$Species_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Species_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef-1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- CAFFEINE_INTERACTION_OUTPUT$Interaction_coef+1.96*CAFFEINE_INTERACTION_OUTPUT$Interaction_stderr
+
+CAFFEINE_INTERACTION_OUTPUT <-cbind(CAFFEINE_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <-CAFFEINE_INTERACTION_OUTPUT %>% dplyr::select(Phylum, SampleIDID, Caffeine_coefficient,Caffeine_stderr,maincaffeine_cilow,maincaffeine_cihigh,Species_coef,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+CAFFEINE_INTERACTION_OUTPUT_reorder <- cbind(CAFFEINE_INTERACTION_OUTPUT_reorder,interaction_phyla_df_reshape[,-c(1:2)])
+
+```
+
+
+#Caffeine_interaction plot
+```{r}
+#Extract coefficient for all significant associations
+#Digit_span;wisc_sum
+Pro_dig <- lm(Digit_span ~ Caffeine +Proteobacteria + Proteobacteria*Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=INTERACTION_speciesdf)
+Coef_df_prodig <- coef(summary(Pro_dig))[,1] %>% as.data.frame()
+colnames(Coef_df_prodig) <- 'Digit_span'
+
+WISC_sum <- lm(WISC_sum ~ Caffeine +Proteobacteria + Proteobacteria*Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=INTERACTION_speciesdf)
+Coef_df_prowisc <- coef(summary(WISC_sum))[,1] %>% as.data.frame()
+colnames(Coef_df_prowisc) <- 'WISC_sum'
+
+Coefficients_caff_inter <- cbind(Coef_df_prodig,Coef_df_prowisc)
+
+INTERACTION_speciesdf %>% 
+  summarise(quantile = scales::percent(c(0.25, 0.5, 0.75)),
+            Caffeine_percentile = quantile(Caffeine,c(0.25, 0.5, 0.75)))
+
+#   quantile Caffeine_percentile
+# 1      25%            6.655879
+# 2      50%            8.606612
+# 3      75%            9.849482
+
+summary(INTERACTION_speciesdf$Proteobacteria)
+# > summary(INTERACTION_speciesdf$Proteobacteria)
+#    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.00000 0.00000 0.04769 0.11403 0.10853 1.07056 
+summary(INTERACTION_speciesdf$Family_Income_postdelivery)
+  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 22000   45000   60000   69008   85000  200000 
+
+#maximum 1.07%-0.0107056 (0.011) (step interval 0.0001, 110 steps)
+
+###Digit_span###
+#25percentile
+#FIXED + 0.0001 increment of Proteobacteria
+i=seq(0,0.011,by=0.0001)
+y=Coefficients_caff_inter$Digit_span[1]+ #Intercept
+  Coefficients_caff_inter$Digit_span[2]*6.655879+ #CaffeineFixed25%
+  Coefficients_caff_inter$Digit_span[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$Digit_span[8]*6.655879*i+ #Interaction
+  Coefficients_caff_inter$Digit_span[3]*i #Proteobacteria
+
+#50percentile
+i=seq(0,0.011,by=0.0001)
+y_50=Coefficients_caff_inter$Digit_span[1]+ #Intercept
+  Coefficients_caff_inter$Digit_span[2]*8.606612+ #CaffeineFixed50%
+  Coefficients_caff_inter$Digit_span[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$Digit_span[8]*8.606612*i+ #Interaction
+  Coefficients_caff_inter$Digit_span[3]*i #Proteobacteria
+
+#75percentile
+i=seq(0,0.011,by=0.0001)
+y_75=Coefficients_caff_inter$Digit_span[1]+ #Intercept
+  Coefficients_caff_inter$Digit_span[2]*9.849482+ #CaffeineFixed75%
+  Coefficients_caff_inter$Digit_span[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$Digit_span[8]*9.849482*i+ #Interaction
+  Coefficients_caff_inter$Digit_span[3]*i #Proteobacteria
+
+
+DIGIT_PRO_PLOT <- cbind(i,y,y_50,y_75) %>% as.data.frame()
+
+DIGIT_PRO_Fig <- ggplot(DIGIT_PRO_PLOT, aes(i*100)) +  
+    geom_line(aes(y = y), linetype="twodash",color = "black") +
+    geom_line(aes(y = y_50), linetype="longdash",color = "black") +
+    geom_line(aes(y = y_75), linetype="solid",color = "black")+
+    annotate("text",x=0.5,y=11.86,size=6,label="Caffeine fixed at 25% percentile")+
+    annotate("text",x=0.5,y=11.65,size=6,label="Caffeine fixed at 50% percentile",angle='-7')+
+    annotate("text",x=0.5,y=11.52,size=6,label="Caffeine fixed at 75% percentile",angle='-9')+theme_bw() +
+    labs(y= "WISC-IV Digit Span Score (points)", x = "%Proteobacteria Relative Abundance")+
+    theme(panel.grid.major =element_blank(),
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),text = element_text(size = 18)) +theme(strip.background = element_rect(fill = "white", color = "black", size = 1))+
+    #ggtitle("Interaction Caffeine and Proteobacteria->Digit Span")+
+    theme(plot.title = element_text(size=18,hjust = 0.5))
+  
+DIGIT_PRO_Fig
+
+####WISC_SUM###
+#25percentile
+#FIXED + 0.0001 increment of Proteobacteria
+i=seq(0,0.011,by=0.0001)
+y_25_WISC=Coefficients_caff_inter$WISC_sum[1]+ #Intercept
+  Coefficients_caff_inter$WISC_sum[2]*6.655879+ #CaffeineFixed25%
+  Coefficients_caff_inter$WISC_sum[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$WISC_sum[8]*6.655879*i+ #Interaction
+  Coefficients_caff_inter$WISC_sum[3]*i #Proteobacteria
+
+#50percentile
+i=seq(0,0.011,by=0.0001)
+y_50_WISC=Coefficients_caff_inter$WISC_sum[1]+ #Intercept
+  Coefficients_caff_inter$WISC_sum[2]*8.606612+ #CaffeineFixed50%
+  Coefficients_caff_inter$WISC_sum[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$WISC_sum[8]*8.606612*i+ #Interaction
+  Coefficients_caff_inter$WISC_sum[3]*i #Proteobacteria
+
+#75percentile
+i=seq(0,0.011,by=0.0001)
+y_75_WISC=Coefficients_caff_inter$WISC_sum[1]+ #Intercept
+  Coefficients_caff_inter$WISC_sum[2]*9.849482+ #CaffeineFixed75%
+  Coefficients_caff_inter$WISC_sum[6]*69008+ #IncomeFixedatMean
+  Coefficients_caff_inter$WISC_sum[8]*9.849482*i+ #Interaction
+  Coefficients_caff_inter$WISC_sum[3]*i #Proteobacteria
+
+
+WISC_PRO_PLOT <- cbind(i,y_25_WISC,y_50_WISC,y_75_WISC) %>% as.data.frame()
+
+WISC_PRO_Fig <- ggplot(WISC_PRO_PLOT, aes(i*100)) +  
+    geom_line(aes(y = y_25_WISC), linetype="twodash",color = "black") +
+    geom_line(aes(y = y_50_WISC), linetype="longdash",color = "black") +
+    geom_line(aes(y = y_75_WISC), linetype="solid",color = "black")+
+    annotate("text",x=0.5,y=56.6,size=6,label="Caffeine fixed at 25% percentile")+
+    annotate("text",x=0.5,y=56.05,size=6,label="Caffeine fixed at 50% percentile",angle='-8')+
+    annotate("text",x=0.5,y=55.7,size=6,label="Caffeine fixed at 75% percentile",angle='-10')+theme_bw() +
+    labs(y= "WISC-IV Sum Score (points)", x = "%Proteobacteria Relative Abundance")+
+  #WISC-IV Information Score (points)
+    theme(panel.grid.major =element_blank(),
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),text = element_text(size = 18)) +theme(strip.background = element_rect(fill = "white", color = "black", size = 1))+
+    #ggtitle("Interaction Caffeine and Proteobacteria->WISC_SUM")+
+    theme(plot.title = element_text(size=18,hjust = 0.5))
+  
+WISC_PRO_Fig
+
+```
+
+######Interaction acetaminophen
+#Interaction acetaminophen_species
+###clean up working environment and rerun skipping caffeine. same naming
+```{r}
+interaction_df <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df) <- Rownameloopspecies
+colnames(interaction_df) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+  
+    formula1 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula1,INTERACTION_speciesdf)
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula2, INTERACTION_speciesdf)
+    
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_df[speciesname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+  
+}
+
+
+interaction_df_reshape <- cbind(row.names(interaction_df),interaction_df)
+interaction_df_reshape <- interaction_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_df)`)
+
+interaction_df_reshape <- gather(interaction_df_reshape, "SampleIDID", "value",2:8)
+
+interaction_df_reshape$FDR_qval <- p.adjust(interaction_df_reshape$value, method = "fdr")
+
+
+interaction_df_reshape <- interaction_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+###########Acetaminophen Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["AcetaminophenD"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Acetaminophen_coefficient=value)
+
+################Acetaminophen main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["AcetaminophenD","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Acetaminophen_stderr=value)
+
+##############Acetaminophenspecies - main effect################
+
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############Acetaminophen species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 34))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[7:40]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 7:40){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+Acetaminophen_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+Acetaminophen_INTERACTION_OUTPUT <- Acetaminophen_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(Acetaminophen_INTERACTION_OUTPUT)[1] <- "Species"
+
+ConfidenceIntervals <- data.frame(mainAcetaminophen_cilow = numeric(),
+                       mainAcetaminophen_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:238,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$mainAcetaminophen_cilow <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient-1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+ConfidenceIntervals$mainAcetaminophen_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient+1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- Acetaminophen_INTERACTION_OUTPUT$Species_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Species_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+
+Acetaminophen_INTERACTION_OUTPUT <-cbind(Acetaminophen_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <-Acetaminophen_INTERACTION_OUTPUT %>% dplyr::select(Species, SampleIDID, Acetaminophen_coefficient,Acetaminophen_stderr,mainAcetaminophen_cilow,mainAcetaminophen_cihigh,Species_coef,,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <- cbind(Acetaminophen_INTERACTION_OUTPUT_reorder,interaction_df_reshape[,-c(1:2)])
+
+```
+
+
+
+#Interaction acetaminophen_pathway
+###clean up working environment and rerun skipping caffeine. same naming
+#must run this for phylum
+```{r}
+#########pathway interaction######
+TOP10pathway_table <- TOP10pathway_table[,-1]
+row.names(TOP10pathway_table) <- TOP10pathway_table$Pathway
+TOP10pathway_table <- TOP10pathway_table[,-50]
+TOP10pathway_table <- TOP10pathway_table %>% t()
+rowClean <- function(x){ rownames(x) <- gsub("P_", "", rownames(x)); x } 
+TOP10pathway_table <- rowClean(TOP10pathway_table)
+TOP10pathway_table <- TOP10pathway_table %>% as.data.frame()
+
+#Normalize to 100%
+TOP10pathway_table <- TOP10pathway_table*100
+INTERACTION_speciesdf <- cbind(INTERACTION_speciesdf,TOP10pathway_table)
+```
+
+
+#Interaction acetaminophen_pathway
+```{r}
+#48-83
+interaction_pathway_df <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopath <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_pathway_df) <- Rownameloopath
+colnames(interaction_pathway_df) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    pathname=colnames(INTERACTION_speciesdf[i])
+  
+    formula3 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", pathname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula3,INTERACTION_speciesdf)
+    
+    formula4 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", pathname, "+", pathname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula4, INTERACTION_speciesdf)
+    
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_pathway_df[pathname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+  
+}
+
+
+interaction_pathway_df_reshape <- cbind(row.names(interaction_pathway_df),interaction_pathway_df)
+interaction_pathway_df_reshape <- interaction_pathway_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_pathway_df)`)
+interaction_pathway_df_reshape <- gather(interaction_pathway_df_reshape, "SampleIDID", "value",2:8)
+interaction_pathway_df_reshape$FDR_qval <- p.adjust(interaction_pathway_df_reshape$value, method = "fdr")
+
+interaction_pathway_df_reshape <- interaction_pathway_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+###########Acetaminophen Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["AcetaminophenD"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Acetaminophen_coefficient=value)
+
+################Acetaminophen main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["AcetaminophenD","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Acetaminophen_stderr=value)
+
+
+##############Acetaminophen species - main effect################
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############Acetaminophen species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_pathway_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_pathway_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 36))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[48:83]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 48:83){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_pathway_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_pathway_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+
+Acetaminophen_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+Acetaminophen_INTERACTION_OUTPUT <- Acetaminophen_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(Acetaminophen_INTERACTION_OUTPUT)[1] <- "Pathway"
+
+ConfidenceIntervals <- data.frame(mainAcetaminophen_cilow = numeric(),
+                       mainAcetaminophen_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:252,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$mainAcetaminophen_cilow <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient-1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+ConfidenceIntervals$mainAcetaminophen_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient+1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- Acetaminophen_INTERACTION_OUTPUT$Species_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Species_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+
+Acetaminophen_INTERACTION_OUTPUT <-cbind(Acetaminophen_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <-Acetaminophen_INTERACTION_OUTPUT %>% dplyr::select(Pathway, SampleIDID, Acetaminophen_coefficient,Acetaminophen_stderr,mainAcetaminophen_cilow,mainAcetaminophen_cihigh,Species_coef,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <- cbind(Acetaminophen_INTERACTION_OUTPUT_reorder,interaction_pathway_df_reshape[,-c(1:2)])
+```
+
+
+#Interaction acetaminophen_phylum
+###MUST clean up working environment and rerun skipping caffeine, pathway, and species. same naming
+```{r}
+###########phylum#########
+
+row.names(TOP10Phylum_table) <- TOP10Phylum_table$Phylum
+TOP10Phylum_table <- TOP10Phylum_table[,-1]
+TOP10Phylum_table <- TOP10Phylum_table %>% t()
+TOP10Phylum_table <- cbind(row.names(TOP10Phylum_table),TOP10Phylum_table)
+TOP10Phylum_table <- TOP10Phylum_table %>% as.data.frame() %>% dplyr::rename(SampleID='V1')
+TOP10Phylum_table <- match_df(TOP10Phylum_table,matchneuro, on ="SampleID")
+TOP10Phylum_table <- TOP10Phylum_table %>% arrange(SampleID)
+TOP10Phylum_table <- TOP10Phylum_table[,-1]
+TOP10Phylum_table[] <- lapply(TOP10Phylum_table[], function(x) as.numeric(as.character(x)))
+
+
+INTERACTION_speciesdf <- cbind(INTERACTION_speciesdf,TOP10Phylum_table)
+INTERACTION_speciesdf <- INTERACTION_speciesdf %>% select(-Fusobacteria,-Spirochaetes,-Eukaryota_unclassified,-Euryarchaeota)
+
+#84-88
+interaction_phyla_df <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloophyla <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_phyla_df) <- Rownameloophyla
+colnames(interaction_phyla_df) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    phylaname=colnames(INTERACTION_speciesdf[i])
+  
+    formula5 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", phylaname, "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_NO <- lm(formula5,INTERACTION_speciesdf)
+    
+    formula6 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", phylaname, "+", phylaname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_YES <- lm(formula6, INTERACTION_speciesdf)
+    
+    results=lrtest(INTERACTION_NO, INTERACTION_YES)
+    interaction_phyla_df[phylaname,neuroname]=results[2,'Pr(>Chisq)']
+  }
+  
+}
+
+
+interaction_phyla_df_reshape <- cbind(row.names(interaction_phyla_df),interaction_phyla_df)
+interaction_phyla_df_reshape <- interaction_phyla_df_reshape %>% dplyr::rename(SpeciesIDID=`row.names(interaction_phyla_df)`)
+interaction_phyla_df_reshape <- gather(interaction_phyla_df_reshape, "SampleIDID", "value",2:8)
+interaction_phyla_df_reshape$FDR_qval <- p.adjust(interaction_phyla_df_reshape$value, method = "fdr")
+#siginificant Proteobacteria WISC_SUM & DIGIT SPAN
+
+interaction_phyla_df_reshape <- interaction_phyla_df_reshape %>% 
+  dplyr::rename(LRTpval=value) %>% 
+  dplyr::rename(LRTqval=FDR_qval)
+
+###########Acetaminophen Main effect, coefficient##############
+interaction_df_main <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_main) <- Rownameloopspecies
+colnames(interaction_df_main) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_coef <- coef(lm(formula2, INTERACTION_speciesdf))
+    interaction_df_main[speciesname,neuroname]=Caffeine_coef["AcetaminophenD"]
+  }
+}
+
+interaction_df_main_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_main)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_main_reshape <- gather(interaction_df_main_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_reshape <- interaction_df_main_reshape %>% dplyr::rename(Acetaminophen_coefficient=value)
+
+################Acetaminophen main effect, stderror###############
+interaction_df_main_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_main_se) <- Rownameloopspecies
+colnames(interaction_df_main_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Caffeine_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_main_se[speciesname,neuroname]=Caffeine_se["AcetaminophenD","Std. Error"]
+  }
+}
+
+interaction_df_main_se_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_main_se)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_main_se_reshape <- gather(interaction_df_main_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_main_se_reshape <- interaction_df_main_se_reshape %>% dplyr::rename(Acetaminophen_stderr=value)
+
+
+##############species - main effect################
+interaction_df_species <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_species) <- Rownameloopspecies
+colnames(interaction_df_species) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species[speciesname,neuroname]=Species_coef[3,"Estimate"]
+  }
+}
+
+interaction_df_species_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_species)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_species_reshape <- gather(interaction_df_species_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_reshape <- interaction_df_species_reshape %>% dplyr::rename(Species_coef=value)
+
+##############species - main effect, stderror###############
+interaction_df_species_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(interaction_df_species_se) <- Rownameloopspecies
+colnames(interaction_df_species_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    Species_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    interaction_df_species_se[speciesname,neuroname]=Species_se[3,"Std. Error"]
+  }
+}
+
+interaction_df_species_se_reshape <- cbind(row.names(interaction_phyla_df),interaction_df_species_se)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+interaction_df_species_se_reshape <- gather(interaction_df_species_se_reshape, "SampleIDID", "value",2:8)
+interaction_df_species_se_reshape <- interaction_df_species_se_reshape %>% dplyr::rename(Species_stderr=value)
+
+
+############Interaction coefficient################
+INTERACTION_all_df <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(INTERACTION_all_df) <- Rownameloopspecies
+colnames(INTERACTION_all_df) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_coef <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_all_df[speciesname,neuroname]=INTERACTION_coef[8,"Estimate"]
+  }
+}
+
+INTERACTION_all_reshape <- cbind(row.names(interaction_phyla_df),INTERACTION_all_df)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+INTERACTION_all_reshape <- gather(INTERACTION_all_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_reshape <- INTERACTION_all_reshape %>% dplyr::rename(Interaction_coef=value)
+
+
+##############Interaction stderr#################
+INTERACTION_df_se <- data.frame(matrix(ncol = 7, nrow = 5))
+Colnameloopneuro <- colnames(INTERACTION_speciesdf)[41:47]
+Rownameloopspecies <- colnames(INTERACTION_speciesdf)[84:88]
+row.names(INTERACTION_df_se) <- Rownameloopspecies
+colnames(INTERACTION_df_se) <- Colnameloopneuro
+
+for (i in 84:88){
+  for (j in 41:47){
+    neuroname=colnames(INTERACTION_speciesdf[j])
+    speciesname=colnames(INTERACTION_speciesdf[i])
+    
+    formula2 <- as.formula(paste0(neuroname, "~", "Acetaminophen +", speciesname, "+", speciesname, "*Acetaminophen", "+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex"))
+    INTERACTION_se <- coef(summary(lm(formula2, INTERACTION_speciesdf)))
+    INTERACTION_df_se[speciesname,neuroname]=INTERACTION_se[8,"Std. Error"]
+  }
+}
+
+INTERACTION_all_se_reshape <- cbind(row.names(interaction_phyla_df),INTERACTION_df_se)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(SpeciesIDID="row.names(interaction_phyla_df)")
+INTERACTION_all_se_reshape <- gather(INTERACTION_all_se_reshape, "SampleIDID", "value",2:8)
+INTERACTION_all_se_reshape <- INTERACTION_all_se_reshape %>% dplyr::rename(Interaction_stderr=value)
+
+Acetaminophen_INTERACTION_OUTPUT <- cbind(interaction_df_main_reshape,interaction_df_main_se_reshape,interaction_df_species_reshape,interaction_df_species_se_reshape,INTERACTION_all_reshape,INTERACTION_all_se_reshape)
+Acetaminophen_INTERACTION_OUTPUT <- Acetaminophen_INTERACTION_OUTPUT[,-c(4:5,7:8,10:11,13:14,16:17)]
+
+colnames(Acetaminophen_INTERACTION_OUTPUT)[1] <- "Phylum"
+
+ConfidenceIntervals <- data.frame(mainAcetaminophen_cilow = numeric(),
+                       mainAcetaminophen_cihigh = numeric(),
+                       mainspecies_cilow = numeric(),
+                      mainspecies_cihigh = numeric(),
+                     interaction_cilow = numeric(),
+                      interaction_cihigh = numeric(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:35,] <- NA
+
+#CI FOR MAIN EFFECT CAFFEINE
+ConfidenceIntervals$mainAcetaminophen_cilow <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient-1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+ConfidenceIntervals$mainAcetaminophen_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_coefficient+1.96*Acetaminophen_INTERACTION_OUTPUT$Acetaminophen_stderr
+
+#CI for main effect species
+ConfidenceIntervals$mainspecies_cilow <- Acetaminophen_INTERACTION_OUTPUT$Species_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+ConfidenceIntervals$mainspecies_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Species_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Species_stderr
+
+#CI for interaction all
+ConfidenceIntervals$interaction_cilow <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef-1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+ConfidenceIntervals$interaction_cihigh <- Acetaminophen_INTERACTION_OUTPUT$Interaction_coef+1.96*Acetaminophen_INTERACTION_OUTPUT$Interaction_stderr
+
+Acetaminophen_INTERACTION_OUTPUT <-cbind(Acetaminophen_INTERACTION_OUTPUT,ConfidenceIntervals)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <-Acetaminophen_INTERACTION_OUTPUT %>% dplyr::select(Phylum, SampleIDID, Acetaminophen_coefficient,Acetaminophen_stderr,mainAcetaminophen_cilow,mainAcetaminophen_cihigh,Species_coef,Species_stderr,mainspecies_cilow,mainspecies_cihigh,Interaction_coef,Interaction_stderr,interaction_cilow,interaction_cihigh)
+
+Acetaminophen_INTERACTION_OUTPUT_reorder <- cbind(Acetaminophen_INTERACTION_OUTPUT_reorder,interaction_phyla_df_reshape[,-c(1:2)])
+
+```
+
+#Acetaminophen interaction plot
+```{r}
+#Extract coefficient for all significant associations
+#Digit_span;wisc_sum
+Pro_dig <- lm(Digit_span ~ Acetaminophen +Proteobacteria + Proteobacteria*Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=INTERACTION_speciesdf)
+Coef_df_prodig <- coef(summary(Pro_dig))[,1] %>% as.data.frame()
+colnames(Coef_df_prodig) <- 'Digit_span'
+
+WISC_sum <- lm(WISC_sum ~ Acetaminophen +Proteobacteria + Proteobacteria*Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=INTERACTION_speciesdf)
+Coef_df_prowisc <- coef(summary(WISC_sum))[,1] %>% as.data.frame()
+colnames(Coef_df_prowisc) <- 'WISC_sum'
+
+Information <- lm(Information ~ Acetaminophen +Proteobacteria + Proteobacteria*Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=INTERACTION_speciesdf)
+Coef_df_proinfo <- coef(summary(Information))[,1] %>% as.data.frame()
+colnames(Coef_df_proinfo) <- 'Information'
+
+
+Coefficients_ace_inter <- cbind(Coef_df_prodig,Coef_df_prowisc,Coef_df_proinfo)
+
+
+summary(INTERACTION_speciesdf$Proteobacteria)
+# > summary(INTERACTION_speciesdf$Proteobacteria)
+#    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.00000 0.00000 0.04769 0.11403 0.10853 1.07056 
+summary(INTERACTION_speciesdf$Family_Income_postdelivery)
+  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 22000   45000   60000   69008   85000  200000 
+
+#maximum 1.07%-0.0107056 (0.011) (step interval 0.0001, 110 steps)
+
+###Digit_span###
+
+#FIXED + 0.0001 increment of Proteobacteria
+i=seq(0,0.011,by=0.0001)
+y_ace_nd=Coefficients_ace_inter$Digit_span[1]+ #Intercept
+  Coefficients_ace_inter$Digit_span[2]*0+ #Acetaminophen fixed at Non detected
+  Coefficients_ace_inter$Digit_span[rownames(Coefficients_ace_inter)=="Family_Income_postdelivery"]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$Digit_span[8]*0*i+ #Interaction
+  Coefficients_ace_inter$Digit_span[3]*i #Proteobacteria
+
+#50percentile
+i=seq(0,0.011,by=0.0001)
+y_ace_d=Coefficients_ace_inter$Digit_span[1]+ #Intercept
+  Coefficients_ace_inter$Digit_span[2]*1+ #Acetaminophen fixed at detected
+  Coefficients_ace_inter$Digit_span[6]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$Digit_span[8]*1*i+ #Interaction
+  Coefficients_ace_inter$Digit_span[3]*i #Proteobacteria
+
+
+DIGIT_PRO_PLOT <- cbind(i,y_ace_nd,y_ace_d) %>% as.data.frame()
+
+DIGIT_PRO_Fig <- ggplot(DIGIT_PRO_PLOT, aes(i*100)) +  
+    geom_line(aes(y = y_ace_nd), linetype="longdash",color = "black") +
+    geom_line(aes(y = y_ace_d), linetype="solid",color = "black")+
+    annotate("text",x=0.5,y=11.75,size=6,label="Acetaminophen fixed at detected",angle='-3')+
+    annotate("text",x=0.5,y=11.07,size=6,label="Acetaminophen fixed at non-detected")+theme_bw() +
+    labs(y= "WISC-IV Digit Span Score", x = "%Proteobacteria Relative Abundance")+
+    theme(panel.grid.major =element_blank(),
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),text = element_text(size = 18)) +theme(strip.background = element_rect(fill = "white", color = "black", size = 1))+
+    #ggtitle("Interaction Acetaminophen and Proteobacteria->Digit Span")+
+    theme(plot.title = element_text(size=18,hjust = 0.5))
+  
+DIGIT_PRO_Fig
+
+
+####WISC_SUM###
+#FIXED + 0.0001 increment of Proteobacteria
+i=seq(0,0.011,by=0.0001)
+y_ace_nd_wisc=Coefficients_ace_inter$WISC_sum[1]+ #Intercept
+  Coefficients_ace_inter$WISC_sum[2]*0+ #Acetaminophen fixed at Non detected
+  Coefficients_ace_inter$WISC_sum[6]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$WISC_sum[8]*0*i+ #Interaction
+  Coefficients_ace_inter$WISC_sum[3]*i #Proteobacteria
+
+
+i=seq(0,0.011,by=0.0001)
+y_ace_d_wisc=Coefficients_ace_inter$WISC_sum[1]+ #Intercept
+  Coefficients_ace_inter$WISC_sum[2]*1+ #Acetaminophen fixed at detected
+  Coefficients_ace_inter$WISC_sum[6]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$WISC_sum[8]*1*i+ #Interaction
+  Coefficients_ace_inter$WISC_sum[3]*i #Proteobacteria
+
+
+wisc_PRO_PLOT <- cbind(i,y_ace_nd_wisc,y_ace_d_wisc) %>% as.data.frame()
+
+wisc_PRO_Fig <- ggplot(wisc_PRO_PLOT, aes(i*100)) +  
+    geom_line(aes(y = y_ace_nd_wisc), linetype="longdash",color = "black") +
+    geom_line(aes(y = y_ace_d_wisc), linetype="solid",color = "black")+
+    annotate("text",x=0.5,y=57.89,size=6,label="Acetaminophen fixed at detected")+
+    annotate("text",x=0.5,y=53.15,size=6,label="Acetaminophen fixed at non-detected")+
+    theme_bw() +
+    labs(y= "WISC-IV Sum Score", x = "%Proteobacteria Relative Abundance")+
+    theme(panel.grid.major =element_blank(),
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),text = element_text(size = 18)) +theme(strip.background = element_rect(fill = "white", color = "black", size = 1))+
+    #ggtitle("Interaction Acetaminophen and Proteobacteria->WISC_sum")+
+    theme(plot.title = element_text(size=18,hjust = 0.5))
+  
+wisc_PRO_Fig
+
+
+####Information###
+#FIXED + 0.0001 increment of Proteobacteria
+i=seq(0,0.011,by=0.0001)
+y_ace_nd_Information=Coefficients_ace_inter$Information[1]+ #Intercept
+  Coefficients_ace_inter$Information[2]*0+ #Acetaminophen fixed at Non detected
+  Coefficients_ace_inter$Information[6]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$Information[8]*0*i+ #Interaction
+  Coefficients_ace_inter$Information[3]*i #Proteobacteria
+
+
+i=seq(0,0.011,by=0.0001)
+y_ace_d_Information=Coefficients_ace_inter$Information[1]+ #Intercept
+  Coefficients_ace_inter$Information[2]*1+ #Acetaminophen fixed at detected
+  Coefficients_ace_inter$Information[6]*69008+ #IncomeFixedatMean
+  Coefficients_ace_inter$Information[8]*1*i+ #Interaction
+  Coefficients_ace_inter$Information[3]*i #Proteobacteria
+
+
+Information_PRO_PLOT <- cbind(i,y_ace_nd_Information,y_ace_d_Information) %>% as.data.frame()
+
+Information_PRO_Fig <- ggplot(Information_PRO_PLOT, aes(i*100)) +  
+    geom_line(aes(y = y_ace_nd_Information), linetype="longdash",color = "black") +
+    geom_line(aes(y = y_ace_d_Information), linetype="solid",color = "black")+
+    annotate("text",x=0.5,y=10.38,size=6, label="Acetaminophen fixed at detected",angle='-3')+
+    annotate("text",x=0.5,y=9.78,size=6, label="Acetaminophen fixed at non-detected",angle='1')+
+    theme_bw() +
+    labs(y= "WISC-IV Information Score", x = "%Proteobacteria Relative Abundance")+
+    theme(panel.grid.major =element_blank(),
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),text = element_text(size = 18)) +theme(strip.background = element_rect(fill = "white", color = "black", size = 1))+
+    #ggtitle("Interaction Acetaminophen and Proteobacteria->Information")+
+    theme(plot.title = element_text(size=18,hjust = 0.5))
+  
+Information_PRO_Fig
+
+#library(gridExtra)
+#grid.arrange(DIGIT_PRO_Fig,Information_PRO_Fig,wisc_PRO_Fig,nrow=1,top="Acetaminophen Interaction")
+
+```
+
+
+#Turn to phyloseq object-acetaminophen
+```{r}
+#Name it OTU, but it's not OTU! It's species relative abundance
+OTU <- SPECIES_Species_relab
+ROWNAMES_Species <- OTU$Species
+OTU <- OTU[,-c(1:7)]
+
+row.names(OTU) <- NULL
+row.names(OTU) <- ROWNAMES_Species
+OTU <- OTU %>% as.matrix()
+
+colnames(OTU) <- paste("P",colnames(OTU),sep="_")
+
+Taxonomy <- SPECIES_Species_relab %>% 
+  dplyr::select("Domain","Phylum","Class","Order","Family","Genus","Species")
+
+TAX <- Taxonomy %>% as.data.frame() %>% 
+  mutate(Domain=gsub("d__","",Domain)) %>% 
+  mutate(Phylum=gsub("p__","",Phylum)) %>% 
+  mutate(Class=gsub("c__","",Class)) %>% 
+  mutate(Order=gsub("o__","",Order)) %>% 
+  mutate(Family=gsub("f__","",Family)) %>% 
+  mutate(Genus=gsub("g__","",Genus)) %>% 
+  mutate(Species=gsub("s__","",Species)) %>% 
+  as.matrix() %>% as.data.frame()
+
+TAX <- TAX %>% as.matrix()
+row.names(TAX) <- ROWNAMES_Species
+
+map_ace <- AceMatchMatchModel
+map_ace <- cbind(rownames(AceMatchMatchModel),map_ace) 
+map_ace$`rownames(AceMatchMatchModel)` <- as.numeric(map_ace$`rownames(AceMatchMatchModel)`)
+List_46 <- map_ace$`rownames(AceMatchMatchModel)`
+row.names(map_ace) <- List_46
+row.names(map_ace) <- paste("P",row.names(map_ace),sep="_")
+map_ace <- map_ace[,-1]
+
+OTU=otu_table(OTU,taxa_are_rows = TRUE)
+rownames(TAX) <- row.names(OTU)
+TAX=tax_table(TAX)
+map_ace <- map_ace %>% as.data.frame()
+MAP <- sample_data(map_ace)
+
+physeq_ace = merge_phyloseq(OTU, TAX, MAP)
+Tree=rtree(ntaxa(physeq_ace),rooted=TRUE,tip.label = taxa_names(physeq_ace))
+
+physeq_ace = phyloseq(OTU, TAX, MAP,Tree)
+```
+
+#Alpha diversity
+##ace significant categorical
+```{r}
+AlphaEvenness <- evenness(physeq_caffeine, 'pielou')
+AlphaRichness <- alpha(physeq_caffeine,'shannon')
+ALPHA_variables <- cbind(map,AlphaRichness,AlphaEvenness)
+
+ALPHA_variables$diversity_shannon <- scale(ALPHA_variables$diversity_shannon)
+Shannondensity <- ggplot(ALPHA_variables, aes(x=diversity_shannon)) + 
+    geom_histogram(aes(y=..density..), sbinwidth=.5,
+                   colour="black", fill="white") +
+      geom_density(alpha=.2, fill="#FF6666")+ggtitle("Alpha Diversity Density Plot - Shannon")+
+  theme(legend.position="top",axis.text=element_text(size=16),
+        axis.title=element_text(size=16),plot.title = element_text(size=22, hjust=0.5),text = element_text(size = 16),axis.text.x = element_text(angle = 0))+labs(x="Shannon Diversity", y="Count")
+
+Shannondensity
+
+ALPHA_variables$pielou <- scale(ALPHA_variables$pielou)
+Pieloudensity <- ggplot(ALPHA_variables, aes(x=pielou)) + 
+    geom_histogram(aes(y=..density..), sbinwidth=.5,
+                   colour="black", fill="white") +
+      geom_density(alpha=.2, fill="#FF6666")+ggtitle("Alpha Diversity Density Plot - Pielou")+
+  theme(legend.position="top",axis.text=element_text(size=16),
+        axis.title=element_text(size=16),plot.title = element_text(size=22, hjust=0.5),text = element_text(size = 16),axis.text.x = element_text(angle = 0))+labs(x="Pielou Evenness", y="Count")
+
+Pieloudensity
+
+summary(shanCaff <- lm(diversity_shannon ~ Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=ALPHA_variables))
+par(mfrow=c(2,2))
+plot(shanCaff,which=1:4,main="regression diagnose_Caffeine~Shannon")
+
+summary(piCaff <- lm(pielou ~ Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=ALPHA_variables))
+par(mfrow=c(2,2))
+plot(piCaff,which=1:4,main="regression diagnose_Caffeine~Pielou")
+
+AlphaEvenness_ace <- evenness(physeq_ace, 'pielou')
+AlphaRichness_ace <- alpha(physeq_ace,'shannon')
+ALPHA_variables_ace <- cbind(map_ace,AlphaRichness_ace,AlphaEvenness_ace)
+
+summary(shanAce <- lm(diversity_shannon ~ Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=ALPHA_variables_ace))
+par(mfrow=c(2,2))
+plot(shanCaff,which=1:4,main="regression diagnose_Acetaminophen~Shannon")
+
+summary(piAce <- lm(pielou ~ Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=ALPHA_variables_ace))
+par(mfrow=c(2,2))
+plot(piCaff,which=1:4,main="regression diagnose_Acetaminophen~Pielou")
+
+
+AlphaFig <- data.frame(Method = factor(),
+                       Exposure = factor(),
+                       beta = numeric(),
+                       se = numeric(),
+                       ci_low=numeric(),
+                       ci_high=numeric(),
+                       pval=numeric(),
+                       FDR_qval=numeric(),
+                       stringsAsFactors=FALSE)
+
+AlphaFig[1:4,] <- NA
+AlphaFig$Method <- rep(c("Shannon","Pielou"))
+AlphaFig$Method <- factor(AlphaFig$Method, levels = c("Shannon", "Pielou"))
+
+AlphaFig$Exposure <- c("Caffeine","Caffeine","Acetaminophen","Acetaminophen")
+
+AlphaFig$beta[1] <- shanCaff$coefficients["Caffeine"]
+AlphaFig$se[1] <- coef(summary(shanCaff))["Caffeine", "Std. Error"] 
+AlphaFig$pval[1] <- coef(summary(shanCaff))["Caffeine", "Pr(>|t|)"]
+AlphaFig$beta[2] <- piCaff$coefficients[shanCaff$coefficients["Caffeine"]]
+AlphaFig$se[2] <- coef(summary(piCaff))["Caffeine", "Std. Error"]
+AlphaFig$pval[2] <- coef(summary(piCaff))["Caffeine", "Pr(>|t|)"]
+
+AlphaFig$beta[3] <- shanAce$coefficients["AcetaminophenD"]
+AlphaFig$se[3] <- coef(summary(shanAce))["AcetaminophenD", "Std. Error"]
+AlphaFig$pval[3] <- coef(summary(shanAce))["AcetaminophenD", "Pr(>|t|)"]
+AlphaFig$beta[4] <- piAce$coefficients["AcetaminophenD"]
+AlphaFig$se[4] <- coef(summary(piAce))["AcetaminophenD", "Std. Error"]
+AlphaFig$pval[4] <- coef(summary(piAce))["AcetaminophenD", "Pr(>|t|)"]
+
+AlphaFig$ci_low <- AlphaFig$beta-1.96*AlphaFig$se
+AlphaFig$ci_high <- AlphaFig$beta+1.96*AlphaFig$se
+
+AlphaFig$FDR_qval <- p.adjust(AlphaFig$pval, method = "fdr")
+
+AlphaFigure <- ggplot(AlphaFig, aes(Method, beta), group=Exposure) +
+                geom_point(size = 3,  position = position_dodge(width = 1)) +
+                geom_errorbar(data = AlphaFig, aes(ymin = beta - 1.96*se,
+                                  ymax = beta + 1.96*se, linetype = NULL),
+                              width = 0.3, size =0.6,
+                              position=position_dodge(width=1),
+                              group = AlphaFig$Exposure) +
+                geom_hline(yintercept = 0, size = 1) +
+                scale_x_discrete(name = "Alpha Diversity Indices", labels = c("Shannon","Pielou")) +
+                scale_y_continuous(name = "Adjusted Differences in Alpha Diversity \nAmong Exposed Compared to Unexposed") +
+                theme_bw() +
+                theme(panel.grid.major =element_blank(), 
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18)) +
+                facet_wrap( ~ Exposure,scales = "free") +
+                theme(strip.background = element_rect(fill = "white", color = "black", size = 1),strip.text = element_text(size = 18))+
+  theme(panel.spacing = unit(2, "cm"))
+
+AlphaFigure
+
+AlphaFigure_ForLabel <- ggplot(AlphaFig, aes(Method, beta), group=Exposure) +
+                geom_point(size = 3,  position = position_dodge(width = 1)) +
+                geom_errorbar(data = AlphaFig, aes(ymin = beta - 1.96*se,
+                                  ymax = beta + 1.96*se, linetype = NULL),
+                              width = 0.3, size =0.6,
+                              position=position_dodge(width=1),
+                              group = AlphaFig$Exposure) +
+                geom_hline(yintercept = 0, size = 1) +
+                scale_x_discrete(name = "Alpha Diversity Indices", labels = c("Shannon","Pielou")) +
+                scale_y_continuous(name = "Adjusted Change in Alpha Diversity \nper Doubling of Caffeine (ng/g)") +
+                theme_bw() +
+                theme(panel.grid.major =element_blank(), 
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18)) +
+                facet_wrap( ~ Exposure,scales = "free") +
+                theme(strip.background = element_rect(fill = "white", color = "black", size = 1),strip.text = element_text(size = 18))+
+  theme(panel.spacing = unit(1.5, "cm"))
+
+AlphaFigure_ForLabel
+```
+
+#Beta diversity
+```{r}
+adonisTABLE <- data.frame(Exposure = factor(),
+                      Method = character(),
+                      Adjust_covariates = numeric(),
+                      FDR_qval=numeric(),
+                      Adjust_covariates_r2 = numeric())
+adonisTABLE[1:8,] <- NA
+adonisTABLE$Exposure <- factor(adonisTABLE$Exposure, levels = c("Caffeine", "Acetaminophen"))
+adonisTABLE$Exposure[1:4] <- "Caffeine"
+adonisTABLE$Exposure[5:8] <- "Acetaminophen"
+
+adonisTABLE$Method <- rep(c("Weighted UniFrac", "Bray-Curtis", "Unweighted UniFrac","Jaccard"))
+adonisTABLE$Method <- factor(adonisTABLE$Method, levels = c("Weighted UniFrac","Bray-Curtis","Unweighted UniFrac", "Jaccard"))
+
+##############Weighted Unifraq
+yy_weighted_caff <- UniFrac(physeq_caffeine, weighted=TRUE, normalized=TRUE, parallel=FALSE, fast=TRUE)
+yy_weighted_ace <- UniFrac(physeq_ace, weighted=TRUE, normalized=TRUE, parallel=FALSE, fast=TRUE)
+
+set.seed(4)
+weighted_caff <- adonis(formula=yy_weighted_caff~Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=CaffeineMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[1,3] <- weighted_caff$aov.tab["Caffeine","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[1] <- weighted_caff$aov.tab["Caffeine","R2"]
+
+set.seed(4)
+weighted_ace <- adonis(formula=yy_weighted_ace~Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=AceMatchMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[5,3] <- weighted_ace$aov.tab["Acetaminophen","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[5] <- weighted_ace$aov.tab["Acetaminophen","R2"]
+
+############Unweighted unifraq
+yy_unweighted_caff <- UniFrac(physeq_caffeine, weighted=FALSE, normalized=TRUE, parallel=FALSE, fast=TRUE)
+yy_unweighted_ace <- UniFrac(physeq_ace, weighted=FALSE, normalized=TRUE, parallel=FALSE, fast=TRUE)
+
+set.seed(4)
+unweighted_caff <- adonis(formula=yy_unweighted_caff~Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=CaffeineMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[3,3] <- unweighted_caff$aov.tab["Caffeine","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[3] <- unweighted_caff$aov.tab["Caffeine","R2"]
+
+set.seed(4)
+unweighted_ace <- adonis(formula=yy_unweighted_ace~Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=AceMatchMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[7,3] <- unweighted_ace$aov.tab["Acetaminophen","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[7] <- unweighted_ace$aov.tab["Acetaminophen","R2"]
+
+###########Bray-Curtis Distance
+YY_bray_caff <- distance(physeq_caffeine, "bray")
+YY_bray_ace <- distance(physeq_ace, "bray")
+
+set.seed(4)
+bray_caff <- adonis(formula=YY_bray_caff~Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=CaffeineMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[2,3] <- bray_caff$aov.tab["Caffeine","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[2] <- bray_caff$aov.tab["Caffeine","R2"]
+
+set.seed(4)
+bray_ace <- adonis(formula=YY_bray_ace~Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex,data=AceMatchMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[6,3] <- bray_ace$aov.tab["Acetaminophen","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[6] <- bray_ace$aov.tab["Acetaminophen","R2"]
+
+#########jaccard distance########
+yy_jaccard_caff <- distance(physeq_caffeine,"jaccard",binary = TRUE)
+yy_jaccard_ace <- distance(physeq_ace,"jaccard",binary = TRUE)
+
+set.seed(4)
+jaccard_caff <- adonis(formula=yy_jaccard_caff~Caffeine+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=CaffeineMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[4,3] <- jaccard_caff$aov.tab["Caffeine","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[4] <- jaccard_caff$aov.tab["Caffeine","R2"]
+
+set.seed(4)
+jaccard_ace <- adonis(formula=yy_jaccard_ace~Acetaminophen+Breastfed+Delivery_mode+Family_Income_postdelivery+Sex, data=AceMatchMatchModel, permutations = 999, contr.unordered = "contr.sum")
+adonisTABLE[8,3] <- jaccard_ace$aov.tab["Acetaminophen","Pr(>F)"]
+adonisTABLE$Adjust_covariates_r2[8] <- jaccard_ace$aov.tab["Acetaminophen","R2"]
+adonisTABLE$FDR_qval <- p.adjust(adonisTABLE$Adjust_covariates, method = "fdr")
+adonisTABLE[,3:4] <- adonisTABLE[,3:4] %>% round(3)
+#write.csv(BetasigTable,"betaccassociations.csv")
+
+```
+
+
+#Species association
+```{r}
+SPECIES_Species <- SPECIES_Species[,-c(1:6)]
+rownames(SPECIES_Species) <- NULL
+SPECIESLIST <- SPECIES_Species$Species
+rownames(SPECIES_Species) <- SPECIESLIST
+SPECIES_Species <- SPECIES_Species[,-1]
+SPECIES_Species_2 <- t(SPECIES_Species)
+Samplelist_85 <- rownames(SPECIES_Species_2) %>% as.data.frame()
+colnames(Samplelist_85) <- 'SampleID'
+SPECIES_Species_2 <- cbind(Samplelist_85,SPECIES_Species_2)
+rownames(SPECIES_Species_2) <- NULL
+
+######Caffeine species association
+CaffeineMatch_species <- match_df(SPECIES_Species_2,Caffineprocessing_compeletecaffeine, on ="SampleID")
+CaffeineMatch_species <- CaffeineMatch_species[,colSums(CaffeineMatch_species == 0) <= nrow(CaffeineMatch_species)*0.9]
+
+input_metadata_species <- CaffeineMatchModel %>% as.data.frame()
+input_data_species <- CaffeineMatch_species %>% as.data.frame()
+rownames(input_data_species) <- rownames(input_metadata_species)
+input_data_species <- input_data_species[,-1]
+
+fit_data3 = Maaslin2(
+    input_data = input_data_species,
+    input_metadata = input_metadata_species,
+    output = "masslin_species_Caffeine",
+    fixed_effects = c("Caffeine","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Caffeine_species <- read.table(file="./masslin_species_Caffeine/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Caffeine_species <- FDRq_Caffeine_species[which(FDRq_Caffeine_species$metadata=='Caffeine', ),]
+correctedq_Caffeine_species <- p.adjust(FDRq_Caffeine_species$pval, method = "fdr")
+FDRq_Caffeine_species <- cbind(FDRq_Caffeine_species,correctedq_Caffeine_species)
+#no significant
+
+###########acetaminophen species association
+AceMatch_species <- match_df(SPECIES_Species_2,Caffineprocessing_compeletecaffeine, on ="SampleID")
+AceMatch_species <- AceMatch_species[,colSums(AceMatch_species == 0) <= nrow(AceMatch_species)*0.9]
+
+input_metadata_species_ace <- AceMatchMatchModel %>% as.data.frame()
+input_data_species_ace <- AceMatch_species %>% as.data.frame()
+rownames(input_data_species_ace) <- rownames(input_metadata_species_ace)
+input_data_species_ace <- input_data_species_ace[,-1]
+
+fit_data4 = Maaslin2(
+    input_data = input_data_species_ace,
+    input_metadata = input_metadata_species_ace,
+    output = "masslin_species_Ace",
+    fixed_effects = c("Acetaminophen","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Ace_species <- read.table(file="./masslin_species_Ace/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Ace_species <- FDRq_Ace_species[which(FDRq_Ace_species$metadata=='Acetaminophen', ),]
+correctedq_Ace_species <- p.adjust(FDRq_Ace_species$pval, method = "fdr")
+FDRq_Ace_species <- cbind(FDRq_Ace_species,correctedq_Ace_species)
+#no significant
+
+```
+
+
+#Phylum association
+```{r}
+Species_phyla <- Species_phyla[,-1]
+rownames(Species_phyla) <- NULL
+SPECIES_phylaLIST <- Species_phyla$Phylum
+rownames(Species_phyla) <- SPECIES_phylaLIST
+Species_phyla <- Species_phyla[,-1]
+SPECIES_phyla_2 <- t(Species_phyla)
+Samplelist_85 <- rownames(SPECIES_phyla_2) %>% as.data.frame()
+colnames(Samplelist_85) <- 'SampleID'
+SPECIES_phyla_2 <- cbind(Samplelist_85,SPECIES_phyla_2)
+rownames(SPECIES_phyla_2) <- NULL
+
+######Caffeine phylum association
+CaffeineMatch_phy <- match_df(SPECIES_phyla_2,Caffineprocessing_compeletecaffeine, on ="SampleID")
+CaffeineMatch_phy <- CaffeineMatch_phy[,colSums(CaffeineMatch_phy == 0) <= nrow(CaffeineMatch_phy)*0.9]
+
+input_metadata_phy <- CaffeineMatchModel %>% as.data.frame()
+input_data_phy <- CaffeineMatch_phy %>% as.data.frame()
+rownames(input_data_phy) <- rownames(input_metadata_phy)
+input_data_phy <- input_data_phy[,-1]
+
+fit_data5 = Maaslin2(
+    input_data = input_data_phy,
+    input_metadata = input_metadata_phy,
+    output = "masslin_phy_Caffeine",
+    fixed_effects = c("Caffeine","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Caffeine_phy <- read.table(file="./masslin_phy_Caffeine/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Caffeine_phy <- FDRq_Caffeine_phy[which(FDRq_Caffeine_phy$metadata=='Caffeine', ),]
+correctedq_Caffeine_phy <- p.adjust(FDRq_Caffeine_phy$pval, method = "fdr")
+FDRq_Caffeine_phy <- cbind(FDRq_Caffeine_phy,correctedq_Caffeine_phy)
+#no significant
+
+###########acetaminophen phylum association
+AceMatch_phy <- match_df(SPECIES_phyla_2,Caffineprocessing_compeletecaffeine, on ="SampleID")
+AceMatch_phy <- AceMatch_phy[,colSums(AceMatch_phy == 0) <= nrow(AceMatch_phy)*0.9]
+
+input_metadata_phy_ace <- AceMatchMatchModel %>% as.data.frame()
+input_data_phy_ace <- AceMatch_phy %>% as.data.frame()
+rownames(input_data_phy_ace) <- rownames(input_metadata_phy_ace)
+input_data_phy_ace <- input_data_phy_ace[,-1]
+
+fit_data6 = Maaslin2(
+    input_data = input_data_phy_ace,
+    input_metadata = input_metadata_phy_ace,
+    output = "masslin_phy_Ace",
+    fixed_effects = c("Acetaminophen","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Ace_phy <- read.table(file="./masslin_phy_Ace/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Ace_phy <- FDRq_Ace_phy[which(FDRq_Ace_phy$metadata=='Acetaminophen', ),]
+correctedq_Ace_phy <- p.adjust(FDRq_Ace_phy$pval, method = "fdr")
+FDRq_Ace_phy <- cbind(FDRq_Ace_phy,correctedq_Ace_phy)
+#no significant
+
+Phylasigraw <- FDRq_Ace_phy[1:2,]
+Phylasigraw_useful <- Phylasigraw %>% select(metadata,feature,coef,stderr,pval,correctedq_Ace_phy)
+ConfidenceIntervals <- data.frame(cilow = numeric(),
+                      cihigh = numeric(),
+                      Phylum= factor(),
+                       stringsAsFactors=FALSE)
+ConfidenceIntervals[1:2,] <- NA
+ConfidenceIntervals$Phylum <- rep(c("Firmicutes","Actinobacteria"))
+ConfidenceIntervals$cilow <- Phylasigraw_useful$coef-1.96*Phylasigraw_useful$stderr
+ConfidenceIntervals$cihigh <- Phylasigraw_useful$coef+1.96*Phylasigraw_useful$stderr
+
+
+Phylasigraw_useful <- cbind(Phylasigraw_useful,ConfidenceIntervals)
+Phylasigraw_useful_reorder <- Phylasigraw_useful %>% dplyr::select(metadata,Phylum,coef,stderr,cilow,cihigh,pval,correctedq_Ace_phy)
+
+
+TaxaFig <- ggplot(Phylasigraw_useful_reorder, aes(Phylum, coef)) +
+                geom_point(size = 3,  position = position_dodge(width = 1)) +
+                geom_errorbar(data = Phylasigraw_useful_reorder, aes(ymin = coef - 1.96*stderr,
+                              ymax = coef + 1.96*stderr, linetype = NULL),
+                              width = 0.15, size =0.6,
+                              position=position_dodge(width=1)) +
+                geom_hline(yintercept = 0, size = 1) +
+                labs(y= "Adjusted Difference in Relative Abundance \nAmong Exposed Compared to Unexposed")+
+                theme_bw() +theme(panel.grid.major =element_blank(), 
+                      panel.grid.minor =element_blank(),
+                      axis.text = element_text(size = 18),
+                      axis.title = element_text(size = 18),plot.title = element_text(size=18, hjust=0.5),
+                      text = element_text(size = 16)) +
+                theme(strip.background = element_rect(fill = "white", color = "black", size = 1),
+                strip.text = element_text(size = 18))+
+                #ggtitle("Acetaminophen Taxa Associations")+
+                theme(plot.title = element_text(size=22,hjust = 0.5))
+TaxaFig
+
+```
+
+
+#Pathway association
+```{r}
+CaffeineMatch_pathway <- match_df(PathwayClean,Caffineprocessing_compeletecaffeine, on ="SampleID")
+
+CaffeineMatch_pathway <- CaffeineMatch_pathway[,colSums(CaffeineMatch_pathway == 0) <= nrow(CaffeineMatch_pathway)*0.9]
+
+input_metadata_path <- CaffeineMatchModel %>% as.data.frame()
+input_data_path <- CaffeineMatch_pathway %>% as.data.frame()
+rownames(input_data_path) <- rownames(input_metadata_path)
+input_data_path <- input_data_path[,-1]
+
+fit_data1 = Maaslin2(
+    input_data = input_data_path,
+    input_metadata = input_metadata_path,
+    output = "masslin_pathway_Caffeine",
+    fixed_effects = c("Caffeine","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Caffeine <- read.table(file="./masslin_pathway_Caffeine/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Caffeine <- FDRq_Caffeine[which(FDRq_Caffeine$metadata=='Caffeine', ),]
+correctedq_Caffeine <- p.adjust(FDRq_Caffeine$pval, method = "fdr")
+FDRq_Caffeine <- cbind(FDRq_Caffeine,correctedq_Caffeine)
+#NOT significant
+
+#AceMatchMatchModel
+AceMatch_pathway <- match_df(PathwayClean,Caffineprocessing_compeletecaffeine, on ="SampleID")
+AceMatch_pathway <- AceMatch_pathway[,colSums(AceMatch_pathway == 0) <= nrow(AceMatch_pathway)*0.9]
+
+input_metadata_path_ace <- AceMatchMatchModel %>% as.data.frame()
+input_data_path_ace <- AceMatch_pathway %>% as.data.frame()
+rownames(input_data_path_ace) <- rownames(input_metadata_path_ace)
+input_data_path_ace <- input_data_path_ace[,-1]
+
+fit_data2 = Maaslin2(
+    input_data = input_data_path_ace,
+    input_metadata = input_metadata_path_ace,
+    output = "masslin_pathway_Ace",
+    fixed_effects = c("Acetaminophen","Breastfed","Delivery_mode","Family_Income_postdelivery","Sex"))
+FDRq_Ace <- read.table(file="./masslin_pathway_Ace/all_results.tsv",sep = '\t', header = TRUE)
+FDRq_Ace <- FDRq_Ace[which(FDRq_Ace$metadata=='Acetaminophen', ),]
+correctedq_Ace <- p.adjust(FDRq_Ace$pval, method = "fdr")
+FDRq_Ace <- cbind(FDRq_Ace,correctedq_Ace)
+#Not significant
+write.csv(FDRq_Ace,"FDRq_Ace_path.csv")
+write.csv(FDRq_Caffeine,"FDRq_Caff_path.csv")
+
+
+Pathwaymean <- colMeans(CaffeineMatch_pathway) %>% as.matrix()
+Pathwaymean <- Pathwaymean[-1,] %>% as.data.frame()
+colnames(Pathwaymean) <- 'AverageRelativeAbundance'
+
+```
+
+#pathway volcano plot
+```{r}
+Valcanoraw <- FDRq_Caffeine
+volcanoraw_ace <- FDRq_Ace
+
+Caffpath_plot <- ggplot(data=Valcanoraw, aes(x=coef, y=-log10(pval))) + theme_bw()+geom_point()+ geom_hline(yintercept=-log10(0.1), col="blue",linetype='longdash')+scale_x_continuous(name = "Effect Estimate")+scale_y_continuous(name = "-log10(p-value)")+ 
+   geom_point(size = 3, color=8)+ggtitle("Caffeine Pathway Potential")+
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        plot.title = element_text(size=22, hjust=0.5),
+        text = element_text(size = 16))
+
+Valcanoraw_RA <- Valcanoraw
+rownames(Valcanoraw_RA) <- Valcanoraw_RA$feature
+Valcanoraw_RA_ <- merge(Valcanoraw_RA, Pathwaymean,by = 'row.names', all = TRUE)
+Valcanoraw_RA_ <- Valcanoraw_RA_[-c(359,360),]
+
+mycolors <- c("blue","grey")
+Caffpath_plot2 <- ggplot(data=Valcanoraw_RA_, aes(x=coef, y=-log10(pval)))+
+  theme_bw()+geom_point()+ geom_hline(yintercept=-log10(0.1), col="blue",linetype='longdash')+
+  scale_x_continuous(name = "Difference in Pathway Relative Abundance \nper Doubling of Caffeine (ng/g)")+
+  scale_y_continuous(name = "-log10(p-value)")+ 
+  geom_point(aes(size = AverageRelativeAbundance), color=8)+
+  scale_size_continuous(range = c(1.5,10))+
+  theme(legend.position = "none")+
+  ggtitle("Caffeine Pathway Potential")+
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        plot.title = element_text(size=16, hjust=0.5),
+        text = element_text(size = 16))
+Caffpath_plot2
+
+
+volcanoraw_ace['q_value'] <- NA
+volcanoraw_ace$q_value[volcanoraw_ace$correctedq_Ace< 0.1] <- "q value<0.1"
+volcanoraw_ace$q_value[volcanoraw_ace$correctedq_Ace> 0.1] <- "q value>0.1"
+volcanoraw_ace['Label'] <- NA
+volcanoraw_ace$Label[volcanoraw_ace$correctedq_Ace< 0.1] <- "Succinate fermentation to butanoate"
+
+##########match relative abundance size
+volcanoraw_ace_RA <- volcanoraw_ace
+rownames(volcanoraw_ace_RA) <- volcanoraw_ace$feature
+volcanoraw_ace_RA <- merge(volcanoraw_ace_RA, Pathwaymean,by = 'row.names', all = TRUE)
+volcanoraw_ace_RA <- volcanoraw_ace_RA[-c(359,360),]
+
+########
+
+mycolors <- c("blue","grey")
+
+Acepath_plot <- ggplot(data=volcanoraw_ace, aes(x=coef, y=-log10(pval), col=q_value, label = Label)) + theme_bw()+geom_point()+ geom_hline(yintercept=-log10(0.1), col="blue",linetype='longdash')+scale_x_continuous(name = "Effect Estimate")+scale_y_continuous(name = "-log10(p-value)")+ 
+   geom_point(size = 3, color=8)+geom_text(size = 5,hjust=0.95,nudge_y = 0.1)+
+  scale_color_manual(breaks = c("q value<0.1","q value>0.1"),
+                     values=c("blue","grey"))+ggtitle("Acetaminophen Pathway Potential")+theme(legend.position="none")+
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        plot.title = element_text(size=22, hjust=0.5),
+        text = element_text(size = 16))
+Acepath_plot
+
+mycolors <- c("blue","grey")
+
+Acepath_plot2 <- ggplot(data=volcanoraw_ace_RA, aes(x=coef, y=-log10(pval), col=q_value, label = Label)) + theme_bw()+geom_point()+ geom_hline(yintercept=-log10(0.1), col="blue",linetype='longdash')+
+  scale_x_continuous(name = "Difference in Pathway Relative Abundance \nComparing Exposed to Unexposed")+
+  scale_y_continuous(name = "-log10(p-value)")+ 
+  geom_point(aes(size = AverageRelativeAbundance), color=8)+
+  scale_size_continuous(range = c(1.5, 10))+
+  geom_text(size = 5,hjust=0.95,nudge_y = 0.1)+
+  scale_color_manual(breaks = c("q value<0.1","q value>0.1"),
+                     values=c("blue","grey"))+ggtitle("Acetaminophen Pathway Potential")+theme(legend.position="none")+
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        plot.title = element_text(size=16, hjust=0.5),
+        text = element_text(size = 16))
+Acepath_plot2
+
+```
+
